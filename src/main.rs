@@ -1,3 +1,4 @@
+mod autostart;
 mod brightness;
 mod config;
 
