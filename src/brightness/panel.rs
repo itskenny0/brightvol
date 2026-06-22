@@ -113,12 +113,14 @@ impl Brightness {
                 .ok_or_else(|| BrightnessError("WmiSetBrightness has no in-params".into()))?;
             let in_inst = in_sig.SpawnInstance(0).map_err(err("SpawnInstance"))?;
 
-            // Timeout is uint32 (seconds), Brightness is uint8.
-            let timeout = VARIANT::from(1u32);
+            // WMI represents integer property values as VT_I4 regardless of the
+            // declared CIM type (uint32/uint8). Passing VT_UI4/VT_UI1 here is
+            // rejected with WBEM_E_TYPE_MISMATCH (0x80041005), so use i32.
+            let timeout = VARIANT::from(1i32);
             in_inst
                 .Put(w!("Timeout"), 0, &timeout, 0)
                 .map_err(err("Put Timeout"))?;
-            let brightness = VARIANT::from(level);
+            let brightness = VARIANT::from(level as i32);
             in_inst
                 .Put(w!("Brightness"), 0, &brightness, 0)
                 .map_err(err("Put Brightness"))?;
