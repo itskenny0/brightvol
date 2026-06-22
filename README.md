@@ -4,7 +4,7 @@ A tiny Windows tray daemon that intercepts the hardware **Volume Up** / **Volume
 Down** keys and uses them to control your **screen brightness** instead of the
 system volume.
 
-It is a single self-contained `.exe` — no installer, no .NET, no runtime to
+It is a single self-contained `.exe`: no installer, no .NET, no runtime to
 download, nothing to copy alongside it.
 
 ## What it does
@@ -13,9 +13,9 @@ download, nothing to copy alongside it.
 - Raises/lowers the **internal display** brightness (laptops/tablets) in ~10%
   steps instead of changing the volume.
 - Lives in the system tray with a small menu:
-  - **Enabled** — turn the interception on/off (so the volume keys work normally
+  - **Enabled**: turn the interception on/off (so the volume keys work normally
     again when you need them).
-  - **Start on login** — run brightvol automatically when you sign in.
+  - **Start on login**: run brightvol automatically when you sign in.
   - **Exit**.
 - On first launch it asks whether to start automatically on login and remembers
   your answer.
@@ -24,7 +24,7 @@ download, nothing to copy alongside it.
 
 - Windows 10 or 11, 64-bit.
 - A display whose brightness is controllable via WMI
-  (`WmiMonitorBrightnessMethods`) — i.e. typically a laptop/tablet internal
+  (`WmiMonitorBrightnessMethods`), i.e. typically a laptop/tablet internal
   panel. External monitors are not supported in this version.
 
 ## Download
@@ -56,4 +56,4 @@ external runtime dependencies.
 
 ## License
 
-[The Unlicense](LICENSE) — public domain.
+[The Unlicense](LICENSE): public domain.

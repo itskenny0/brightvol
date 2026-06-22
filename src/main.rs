@@ -1,3 +1,4 @@
+mod brightness;
 mod config;
 
 fn main() {
