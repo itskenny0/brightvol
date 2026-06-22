@@ -31,6 +31,11 @@ features = [
     "Win32_Graphics_Gdi",
 ]
 
+[build-dependencies]
+# Embeds the application icon resource. No-ops for non-Windows targets, so it is
+# host-unconditional to support cross-compiling to Windows from other hosts.
+embed-resource = "2"
+
 [profile.release]
 opt-level = "z"
 lto = true

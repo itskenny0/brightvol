@@ -34,6 +34,9 @@ const ID_ENABLED: u32 = 1;
 const ID_AUTOSTART: u32 = 2;
 const ID_EXIT: u32 = 3;
 
+/// Resource id of the embedded application icon (see `app.rc`).
+const ICON_ID: u16 = 100;
+
 /// Show the brightness-failure dialog at most once per run.
 static BRIGHTNESS_ERROR_SHOWN: AtomicBool = AtomicBool::new(false);
 
@@ -145,8 +148,10 @@ pub fn run() {
             }
         };
 
-        // Add the tray icon.
-        let hicon: HICON = LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
+        // Add the tray icon: prefer the embedded app icon, fall back to stock.
+        let hicon: HICON = LoadIconW(hinstance, PCWSTR(ICON_ID as usize as *const u16))
+            .or_else(|_| LoadIconW(None, IDI_APPLICATION))
+            .unwrap_or_default();
         let mut nid = NOTIFYICONDATAW {
             cbSize: size_of::<NOTIFYICONDATAW>() as u32,
             hWnd: hwnd,

@@ -1,0 +1,2 @@
+#define IDI_BRIGHTVOL 100
+IDI_BRIGHTVOL ICON "assets/brightvol.ico"
