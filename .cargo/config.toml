@@ -1,0 +1,4 @@
+# Statically link the MSVC C runtime so the released .exe runs on a clean
+# Windows install with no redistributable to download or install.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
