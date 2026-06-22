@@ -8,6 +8,7 @@ mod autostart;
 mod brightness;
 mod config;
 mod hook;
+mod logging;
 
 #[cfg(windows)]
 mod app;

@@ -3,6 +3,7 @@
 
 use std::cell::RefCell;
 use std::mem::size_of;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
@@ -23,13 +24,18 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::brightness::Brightness;
 use crate::config::Config;
 use crate::hook;
+use crate::logging::log;
 
 const TRAY_ID: u32 = 1;
 const WM_TRAY: u32 = WM_APP + 1;
+const WM_BRIGHTNESS_STEP: u32 = WM_APP + 2;
 
 const ID_ENABLED: u32 = 1;
 const ID_AUTOSTART: u32 = 2;
 const ID_EXIT: u32 = 3;
+
+/// Show the brightness-failure dialog at most once per run.
+static BRIGHTNESS_ERROR_SHOWN: AtomicBool = AtomicBool::new(false);
 
 /// State the window procedure needs. Single-threaded, so a thread-local holds it.
 struct AppState {
@@ -39,6 +45,10 @@ struct AppState {
 
 thread_local! {
     static STATE: RefCell<Option<AppState>> = const { RefCell::new(None) };
+    // Kept separate from STATE: a brightness step pumps the COM message loop and
+    // can re-enter the window proc (e.g. a menu click), so borrowing brightness
+    // must never collide with borrowing the menu/config state.
+    static BRIGHTNESS: RefCell<Option<Brightness>> = const { RefCell::new(None) };
 }
 
 /// Run the application. Returns when the user selects Exit.
@@ -46,6 +56,7 @@ pub fn run() {
     unsafe {
         // COM is needed for the WMI brightness backend.
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        log("starting");
 
         let mut config = Config::load();
 
@@ -65,24 +76,20 @@ pub fn run() {
 
         // Connect to brightness; if it fails the tray still works so the user
         // can disable interception or exit.
-        let hook_result = match Brightness::connect() {
-            Ok(b) => hook::Hook::install(config.intercept_enabled, move |delta| {
-                let _ = b.step(delta);
-            }),
-            Err(e) => {
-                warn(&format!(
-                    "Brightness control is unavailable on this system: {e}\n\nThe volume keys will not be remapped."
-                ));
-                hook::Hook::install(config.intercept_enabled, |_| {})
+        let brightness = match Brightness::connect() {
+            Ok(b) => {
+                match b.current() {
+                    Ok(level) => log(&format!("brightness connected; current = {level}%")),
+                    Err(e) => log(&format!("brightness connected but read failed: {e}")),
+                }
+                Some(b)
             }
-        };
-        // Keep the hook alive for the whole message loop; dropping it unhooks.
-        let _hook = match hook_result {
-            Ok(h) => h,
             Err(e) => {
-                error(&format!("Failed to install the keyboard hook: {e}"));
-                CoUninitialize();
-                return;
+                log(&format!("brightness connect failed: {e}"));
+                warn(&format!(
+                    "Brightness control is unavailable on this system: {e}\n\nThe volume keys will not be remapped to brightness."
+                ));
+                None
             }
         };
 
@@ -126,6 +133,18 @@ pub fn run() {
             }
         };
 
+        // Install the keyboard hook now that we have a window to post to. The
+        // hook only posts WM_BRIGHTNESS_STEP; the work happens in wndproc.
+        // Keep the hook alive for the whole message loop; dropping it unhooks.
+        let _hook = match hook::Hook::install(config.intercept_enabled, hwnd, WM_BRIGHTNESS_STEP) {
+            Ok(h) => h,
+            Err(e) => {
+                error(&format!("Failed to install the keyboard hook: {e}"));
+                CoUninitialize();
+                return;
+            }
+        };
+
         // Add the tray icon.
         let hicon: HICON = LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
         let mut nid = NOTIFYICONDATAW {
@@ -140,6 +159,7 @@ pub fn run() {
         set_tip(&mut nid, "brightvol: volume keys control brightness");
         let _ = Shell_NotifyIconW(NIM_ADD, &nid);
 
+        BRIGHTNESS.with(|b| *b.borrow_mut() = brightness);
         STATE.with(|s| *s.borrow_mut() = Some(AppState { config, nid }));
 
         // Message loop.
@@ -188,14 +208,43 @@ fn set_tip(nid: &mut NOTIFYICONDATAW, text: &str) {
 
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
-        if msg == WM_TRAY {
-            let event = (lparam.0 as u32) & 0xFFFF;
-            if event == WM_RBUTTONUP || event == WM_LBUTTONUP || event == WM_CONTEXTMENU {
-                show_menu(hwnd);
+        match msg {
+            WM_TRAY => {
+                let event = (lparam.0 as u32) & 0xFFFF;
+                if event == WM_RBUTTONUP || event == WM_LBUTTONUP || event == WM_CONTEXTMENU {
+                    show_menu(hwnd);
+                }
+                LRESULT(0)
             }
-            return LRESULT(0);
+            WM_BRIGHTNESS_STEP => {
+                let delta = if wparam.0 == hook::DIR_UP {
+                    crate::brightness::STEP
+                } else {
+                    -crate::brightness::STEP
+                };
+                do_brightness_step(delta);
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
-        DefWindowProcW(hwnd, msg, wparam, lparam)
+    }
+}
+
+/// Perform a brightness step on the message loop (not inside the hook callback).
+unsafe fn do_brightness_step(delta: i8) {
+    let result = BRIGHTNESS.with(|b| b.borrow().as_ref().map(|brightness| brightness.step(delta)));
+
+    match result {
+        Some(Ok(level)) => log(&format!("step {delta:+} -> {level}%")),
+        Some(Err(e)) => {
+            log(&format!("step {delta:+} failed: {e}"));
+            if !BRIGHTNESS_ERROR_SHOWN.swap(true, Ordering::SeqCst) {
+                warn(&format!(
+                    "Could not change the brightness: {e}\n\nThis is shown once. See %APPDATA%\\brightvol\\brightvol.log for details."
+                ));
+            }
+        }
+        None => log(&format!("step {delta:+} ignored: brightness unavailable")),
     }
 }
 
