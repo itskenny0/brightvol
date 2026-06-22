@@ -28,8 +28,8 @@ impl Brightness {
     /// Connect to `root\WMI`. Requires COM to be initialized on this thread.
     pub fn connect() -> Result<Self> {
         unsafe {
-            let locator: IWbemLocator =
-                CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER).map_err(win)?;
+            let locator: IWbemLocator = CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER)
+                .map_err(err("CoCreateInstance"))?;
 
             let services: IWbemServices = locator
                 .ConnectServer(
@@ -41,7 +41,7 @@ impl Brightness {
                     &BSTR::new(),
                     None,
                 )
-                .map_err(win)?;
+                .map_err(err("ConnectServer"))?;
 
             CoSetProxyBlanket(
                 &services,
@@ -53,7 +53,7 @@ impl Brightness {
                 None,
                 EOAC_NONE,
             )
-            .map_err(win)?;
+            .map_err(err("CoSetProxyBlanket"))?;
 
             Ok(Brightness { services })
         }
@@ -67,9 +67,9 @@ impl Brightness {
                 .ok_or_else(|| BrightnessError("no WmiMonitorBrightness instance".into()))?;
             let mut var = VARIANT::new();
             obj.Get(w!("CurrentBrightness"), 0, &mut var, None, None)
-                .map_err(win)?;
+                .map_err(err("Get CurrentBrightness"))?;
             // CurrentBrightness is a uint8; read it through the coercing reader.
-            let value = u32::try_from(&var).map_err(win)?;
+            let value = u32::try_from(&var).map_err(err("read CurrentBrightness"))?;
             Ok(value.min(100) as u8)
         }
     }
@@ -78,16 +78,19 @@ impl Brightness {
     pub fn set(&self, level: u8) -> Result<()> {
         let level = level.min(100);
         unsafe {
-            // Path of an actual WmiMonitorBrightnessMethods instance.
+            // The relative path of an actual WmiMonitorBrightnessMethods
+            // instance. ExecMethod on a namespace-connected IWbemServices wants
+            // the relative path (`__RELPATH`), not the full `__PATH`.
             let inst = self
                 .first_instance("SELECT * FROM WmiMonitorBrightnessMethods")?
                 .ok_or_else(|| BrightnessError("no WmiMonitorBrightnessMethods instance".into()))?;
             let mut path_var = VARIANT::new();
-            inst.Get(w!("__PATH"), 0, &mut path_var, None, None)
-                .map_err(win)?;
-            let path = BSTR::try_from(&path_var).map_err(win)?;
+            inst.Get(w!("__RELPATH"), 0, &mut path_var, None, None)
+                .map_err(err("Get __RELPATH"))?;
+            let path = BSTR::try_from(&path_var).map_err(err("read __RELPATH"))?;
 
-            // Build the WmiSetBrightness input parameters.
+            // Build the WmiSetBrightness input parameters from the method's
+            // in-parameter signature.
             let mut class_obj: Option<IWbemClassObject> = None;
             self.services
                 .GetObject(
@@ -97,7 +100,7 @@ impl Brightness {
                     Some(&mut class_obj),
                     None,
                 )
-                .map_err(win)?;
+                .map_err(err("GetObject"))?;
             let class_obj =
                 class_obj.ok_or_else(|| BrightnessError("failed to get method class".into()))?;
 
@@ -105,18 +108,20 @@ impl Brightness {
             let mut out_sig: Option<IWbemClassObject> = None;
             class_obj
                 .GetMethod(w!("WmiSetBrightness"), 0, &mut in_sig, &mut out_sig)
-                .map_err(win)?;
+                .map_err(err("GetMethod"))?;
             let in_sig = in_sig
                 .ok_or_else(|| BrightnessError("WmiSetBrightness has no in-params".into()))?;
-            let in_inst = in_sig.SpawnInstance(0).map_err(win)?;
+            let in_inst = in_sig.SpawnInstance(0).map_err(err("SpawnInstance"))?;
 
-            // Timeout is uint32, Brightness is uint8 in the WMI method signature.
-            let timeout = VARIANT::from(0u32);
-            in_inst.Put(w!("Timeout"), 0, &timeout, 0).map_err(win)?;
+            // Timeout is uint32 (seconds), Brightness is uint8.
+            let timeout = VARIANT::from(1u32);
+            in_inst
+                .Put(w!("Timeout"), 0, &timeout, 0)
+                .map_err(err("Put Timeout"))?;
             let brightness = VARIANT::from(level);
             in_inst
                 .Put(w!("Brightness"), 0, &brightness, 0)
-                .map_err(win)?;
+                .map_err(err("Put Brightness"))?;
 
             self.services
                 .ExecMethod(
@@ -128,7 +133,7 @@ impl Brightness {
                     None,
                     None,
                 )
-                .map_err(win)?;
+                .map_err(err("ExecMethod"))?;
         }
         Ok(())
     }
@@ -151,7 +156,7 @@ impl Brightness {
                 WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
                 None,
             )
-            .map_err(win)?;
+            .map_err(err("ExecQuery"))?;
 
         let mut objs: [Option<IWbemClassObject>; 1] = [None];
         let mut returned: u32 = 0;
@@ -165,7 +170,16 @@ impl Brightness {
     }
 }
 
-/// Map a Windows COM error into our error type.
-fn win(e: windows::core::Error) -> BrightnessError {
-    BrightnessError(e.message())
+/// Map a Windows COM error into our error type, tagging which call failed and
+/// the HRESULT code (WBEM error codes have no system message text, so the code
+/// is what identifies them).
+fn err(context: &'static str) -> impl Fn(windows::core::Error) -> BrightnessError {
+    move |e| {
+        let msg = e.message();
+        if msg.is_empty() {
+            BrightnessError(format!("{context}: hr=0x{:08X}", e.code().0 as u32))
+        } else {
+            BrightnessError(format!("{context}: hr=0x{:08X} {msg}", e.code().0 as u32))
+        }
+    }
 }
