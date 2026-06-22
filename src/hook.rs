@@ -27,8 +27,11 @@ mod imp {
 
     static ENABLED: AtomicBool = AtomicBool::new(true);
 
+    /// Brightness step action invoked by the hook callback.
+    type Action = Box<dyn Fn(i8)>;
+
     thread_local! {
-        static ACTION: RefCell<Option<Box<dyn Fn(i8)>>> = const { RefCell::new(None) };
+        static ACTION: RefCell<Option<Action>> = const { RefCell::new(None) };
     }
 
     /// An installed keyboard hook. Dropping it removes the hook.

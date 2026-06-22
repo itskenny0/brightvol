@@ -32,8 +32,7 @@ mod imp {
 
             let result = if enabled {
                 let wide = exe_value()?;
-                let bytes =
-                    std::slice::from_raw_parts(wide.as_ptr() as *const u8, wide.len() * 2);
+                let bytes = std::slice::from_raw_parts(wide.as_ptr() as *const u8, wide.len() * 2);
                 RegSetValueExW(hkey, VALUE_NAME, 0, REG_SZ, Some(bytes))
             } else {
                 let rc = RegDeleteValueW(hkey, VALUE_NAME);

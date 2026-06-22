@@ -5,7 +5,7 @@
 //! ([`panel`]); other platforms get a stub so the crate still builds.
 
 mod calc;
-pub use calc::{step_level, STEP};
+pub use calc::STEP;
 
 use std::fmt;
 

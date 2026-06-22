@@ -61,8 +61,7 @@ impl Config {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let text = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
         std::fs::write(path, text)
     }
 }
@@ -127,7 +126,8 @@ mod tests {
     #[test]
     fn partial_json_fills_missing_with_defaults() {
         // `#[serde(default)]` should let an old/partial file still load.
-        let dir = std::env::temp_dir().join(format!("brightvol-test-partial-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("brightvol-test-partial-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.json");
         std::fs::write(&path, r#"{"autostart": true}"#).unwrap();

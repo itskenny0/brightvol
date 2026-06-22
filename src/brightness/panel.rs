@@ -106,8 +106,8 @@ impl Brightness {
             class_obj
                 .GetMethod(w!("WmiSetBrightness"), 0, &mut in_sig, &mut out_sig)
                 .map_err(win)?;
-            let in_sig =
-                in_sig.ok_or_else(|| BrightnessError("WmiSetBrightness has no in-params".into()))?;
+            let in_sig = in_sig
+                .ok_or_else(|| BrightnessError("WmiSetBrightness has no in-params".into()))?;
             let in_inst = in_sig.SpawnInstance(0).map_err(win)?;
 
             // Timeout is uint32, Brightness is uint8 in the WMI method signature.
